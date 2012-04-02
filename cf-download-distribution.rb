@@ -92,6 +92,11 @@ opts = GetoptLong.new(
 key = ENV['AWS_ACCESS_KEY_ID']
 seckey = ENV['AWS_SECRET_ACCESS_KEY']
 
+if !key || !seckey
+    puts "Please set the AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables, or use the -k/-s parameters."
+    exit 1
+end
+
 cnames = []
 signers = []
 oai = nil

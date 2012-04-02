@@ -75,6 +75,7 @@ require 'rubygems'
 require 'right_aws'
 require 'getoptlong'
 require 'rdoc/usage'
+require 'ap'
 
 opts = GetoptLong.new(
     [ '--help',    '-h', GetoptLong::NO_ARGUMENT ],
@@ -90,6 +91,11 @@ opts = GetoptLong.new(
 
 key = ENV['AWS_ACCESS_KEY_ID']
 seckey = ENV['AWS_SECRET_ACCESS_KEY']
+
+if !key || !seckey
+    puts "Please set the AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables, or use the -k/-s parameters."
+    exit 1
+end
 
 cnames = []
 signers = []
@@ -134,17 +140,7 @@ if command == 'list'
     dists = cf.list_streaming_distributions
 
     dists.each do |dist|
-        cn = []
-        cn.push dist[:cnames]
-
-        puts
-        puts "AWS_ID        : #{dist[:aws_id]}"
-        puts "  Status      : #{dist[:status]}"
-        puts "  Enabled     : #{dist[:enabled].to_s}"
-        puts "  domain_name : #{dist[:domain_name]}"
-        puts "  origin      : #{dist[:origin]}"
-        puts "  CNAMEs      : #{cn.join(", ")}"
-        puts "  Comment     : #{dist[:comment]}"
+        ap dist, :indent => -2
     end
 elsif command == 'get'
     if args.length < 1
@@ -156,45 +152,12 @@ elsif command == 'get'
 
     begin
         result = cf.get_streaming_distribution(aws_id)
+        ap result, :indent => -2
     rescue RightAws::AwsError => e
         e.errors.each do |code, msg|
             puts "Error (#{code}): #{msg}"
         end
         exit 1
-    end
-
-    cn = []
-    cn.push result[:cnames]
-
-    puts
-    puts "AWS_ID            : #{result[:aws_id]}"
-    puts "  E_TAG           : #{result[:e_tag]}"
-    puts "  Status          : #{result[:status]}"
-    puts "  Enabled         : #{result[:enabled].to_s}"
-    puts "  domain_name     : #{result[:domain_name]}"
-    puts "  origin          : #{result[:origin]}"
-    puts "  CNAMEs          : #{cn.join(", ")}"
-    puts "  Comment         : #{result[:comment]}"
-    if result[:origin_access_identity]
-        puts "  Origin Access ID: #{result[:origin_access_identity]}"
-    end
-    if result[:trusted_signers]
-        puts "  Trusted Signers : " + result[:trusted_signers].join(", ")
-        #result[:trusted_signers].each do |account|
-        #    puts "      -> aws_account_number: #{account}"
-        #end 
-    end
-    if result[:active_trusted_signers]
-        puts "  Active Signers:"
-        result[:active_trusted_signers].each do |signer|
-            puts "      -> aws_account_number: #{signer[:aws_account_number]}"
-
-            if signer[:key_pair_ids]
-                signer[:key_pair_ids].each do |keypair|
-                    puts "           -> key_pair_id  :  #{keypair}" 
-                end
-            end
-        end
     end
 
 elsif command == 'delete'
@@ -235,8 +198,16 @@ elsif command == 'create'
     end
 
     begin
-        result = cf.create_streaming_distribution(bucket, comment,
-                                                  true, cnames)
+        config = Hash.new
+        config[:s3_origin] ||= Hash.new
+        config[:comment] = comment             if comment
+        config[:trusted_signers] = signers     if signers.length > 0
+        config[:cnames] = cnames               if cnames.length > 0
+        config[:enabled] = enabled             if enabled != nil
+        config[:s3_origin][:dns_name] = bucket if bucket
+        config[:s3_origin][:origin_access_identity] = "origin-access-identity/cloudfront/#{oai}" if oai
+
+        result = cf.create_streaming_distribution(config)
     rescue RightAws::AwsError => e
         e.errors.each do |code, msg|
             puts "Error (#{code}): #{msg}"
@@ -264,12 +235,14 @@ elsif command == 'modify'
 
     begin
         config = cf.get_streaming_distribution_config(aws_id)
+        config[:s3_origin] ||= Hash.new
 
         config[:comment] = comment          if comment
         config[:trusted_signers] = signers  if signers.length > 0
         config[:cnames] = cnames            if cnames.length > 0
         config[:enabled] = enabled          if enabled != nil
-        config[:origin_access_identity] = "origin-access-identity/cloudfront/#{oai}" if oai
+#        config[:s3_origin][:dns_name] = bucket if bucket # Can't change bucket name after create?
+        config[:s3_origin][:origin_access_identity] = "origin-access-identity/cloudfront/#{oai}" if oai
 
         result = cf.set_streaming_distribution_config(aws_id, config)
 
